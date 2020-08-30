@@ -1,0 +1,225 @@
+// gRPC interface for lilscan
+
+syntax = "proto3";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+
+package lilscan.grpc;
+service Interface
+{
+    // General status
+    rpc getStatus(google.protobuf.Empty) returns (Status) {}
+    rpc clearMessages(google.protobuf.Empty) returns (Status) {}
+
+    // Preview and manual control
+    rpc streamPreview(google.protobuf.Empty) returns (stream Frame) {}
+    rpc getParam(Param) returns (Param) {}
+    rpc setParam(Param) returns (Param) {}
+    rpc save(google.protobuf.Empty) returns (google.protobuf.Empty) {}  // save current parameters
+
+    rpc calibDevice(CalibConfig) returns(google.protobuf.Empty) {}         //
+    rpc captureData(CaptureConfig) returns (CaptureInfo) {}                //
+    rpc getCaptureInfo(google.protobuf.Empty) returns (CaptureInfo) {}     // returns last capture info
+
+    rpc cancelAll(google.protobuf.Empty) returns(google.protobuf.Empty) {} // cancel any processing
+    rpc listData(google.protobuf.Empty) returns (stream CaptureInfo) {}
+    rpc deleteData(CaptureInfo) returns (google.protobuf.Empty) {}
+}
+
+message Status
+{
+    enum StatusId
+    {
+        UNAVAILABLE = 0;
+        UNCALIBRATED = 2;
+        CALIBRATED = 3;
+        DISABLED = 4;
+
+        READY = 16;
+        PROCESSING = 17;
+        CALIBRATING = 18;
+        ABORTING = 19;
+    }
+     // general status for all systems
+    StatusId general = 1;
+    uint32 progress = 2;     // value from 0..100 for status bar 
+
+    // sub-systems
+    StatusId camera = 3;
+    StatusId laser1 = 4;
+    StatusId laser2 = 5;
+    StatusId turntable = 6;
+
+    string error_msg = 16;
+    string user_msg = 17;
+    uint64 version = 18;        // version of the system encode as XX.YY.ZZ.BB (X = Major, Y = Minor, Z = Revision, B=Build)
+}
+
+/**
+ * \brief Parameters
+ */
+message Param
+{
+    enum Type
+    {
+        NONE = 0;
+
+        // GENERAL CONFIG FOR ALL MODES
+        GAIN = 1;
+        EXPOSURE = 2;
+        FRAME_RATE = 3;
+        LASER1_POWER = 32;
+        LASER2_POWER = 33;
+        LIGHT_POWER = 34;
+        LIGHT_MODE = 35;                        // ARG1: 0 = NONE, 1=RGB, 2=RGBW"; ARG2 red_balance: 0 = off, >0 red = factor*power
+        TURNTABLE_SERVO = 64;                   // ARG1 = steps/360° , ARG2 = usteps/step
+        TARGET_SIZE = 65;                       // ARG1 = cols, ARG2 = rows
+        TARGET_FIELD_WIDTH = 66;                // ARG1 = width in m
+        TURNTABLE_RADIUS = 67;                  // ARG1 = turntable radius in meters for filtering (0 = disabled)
+        TURNTABLE_HEIGHT = 68;                  // ARG1 = turntable min height in mm, ARG2 == max height in mm
+        TURNTABLE_TARGET_POS = 69;              // ARG1 = turntable target pos in usteps; ARG2 speed in usteps/second (not availe for get commands)
+        TURNTABLE_POS = 70;                     // ARG1 = turntable current pos in usteps; ARG2 moving flag 
+        LASER1_SCALE = 71;                      // ARG1 = scale of the laser in relation to the calibrated value
+        LASER2_SCALE = 72;                      // ARG1 = scale of the laser in relation to the calibrated value
+        LASER1_ENABLED =73;                     // ARG1 > 0 -->  Laser 1 enabled; ARG1 == 0 --> Laser 1 disabled
+        LASER2_ENABLED =74;                     // ARG1 > 0 -->  Laser 2 enabled; ARG1 == 0 --> Laser 2 disabled
+    }
+    Type type = 1;
+    double arg1 = 2;
+    double arg2 = 3;
+}
+
+message CaptureConfig
+{
+    enum Mode
+    {
+        NONE = 0;
+        TURNTABLE_SCAN  = 1;            // Up to three data sets if laser1,laser2 and light (texture) is set
+        TURNTABLE_TEXTURE = 2;
+        PHOTO_RAW = 3;
+        PHOTO_JPEG = 4;
+        CAM_CALIB_POSE1 = 6;
+        CAM_CALIB_POSE2 = 7;
+        CAM_CALIB_POSE3 = 8;
+        CAM_CALIB_POSE4 = 9;
+    }
+    Mode mode = 1;
+    string name = 2;                    // optional name (default is "" --> "scan")
+    uint32 id = 3;                      // optional id (default = 0 --> next free id)
+    double camera_exposure = 4;         // not implemented
+    double camera_gain= 5;
+    double laser1_power = 6;            // Laser power 0..100
+    double laser2_power = 7;            // Laser power 0..100
+    uint32 turntable_steps = 8;
+    double light_power = 9;             // Light power 0..100 in
+    bool auto_exposure = 10;            // use auto_exposure if possible (not for scanning)
+}
+
+message CaptureInfo
+{
+    enum Status
+    {
+        UNKNOWN = 0;
+        QUEUED = 1;
+        SCANNING = 2;
+        PROCESSING = 3;
+        FINISHED = 4;
+        ERROR = 5;
+    }
+    enum Type
+    {
+        NONE = 0;
+        PLY = 1;
+        TAR = 2;
+        BIN = 3;
+        JPEG = 4;
+    }
+    uint32 id = 1;
+    Type type = 2;
+    Status status = 3;
+    string error_msg = 4;
+    repeated string locations = 5;      // files storred on the hard disk
+    uint32 frame_count = 6;
+    CaptureConfig config = 7;
+}
+
+message CalibConfig
+{
+    bool camera = 1;
+    bool laser1 = 2;
+    bool laser2 = 3;
+    bool turntable = 4;
+}
+
+/**
+ * \brief Image Frame
+ */
+message Frame
+{
+     enum Type
+     {
+         UNKNOWN = 0;
+         YUV420p = 1;
+         JPEG = 2;
+         BGGR = 3;
+         RGGB = 4;
+         GBRG= 5;
+         GRBG= 6;
+         BGGR10 = 7;
+         RGGB10 = 8;
+         GBRG10= 9;
+         GRBG10= 10;
+         BGGR16 = 11;
+         RGGB16 = 12;
+         GBRG16= 13;
+         GRBG16= 14;
+         RGB = 15;
+         BGR = 16;
+         LASER_V1 = 64;
+         LASER_HPROFILER_V1= 128;
+         LASER_VPROFILER_V1= 129;
+     }
+     enum Flag
+     {
+        NONE = 0;
+        CAM_CALIB_POSE1 = 1;
+        CAM_CALIB_POSE2 = 2;
+        CAM_CALIB_POSE3 = 4;
+        CAM_CALIB_POSE4 = 8;
+        CAM_CALIB_POSE  = 16;
+        LASER1_CALIB_POSE1 = 32;
+        LASER1_CALIB_POSE2 = 64;
+        LASER2_CALIB_POSE1 = 128;
+        LASER2_CALIB_POSE2 = 256;
+        TARGET_FOUND = 512;
+        TARGET_TOO_DARK = 1024;
+        TARGET_TOO_BRIGHT = 2048;
+        TARGET_UNSHARP = 4096;
+        TARGET_WRONG_POSE = 8192;
+        LASER1_ON = 16384;              // used to flag data for first projector
+        LASER2_ON = 32768;              // used to flag data for second projector
+        LIGHT_ON = 65536;
+        NOISE = 131072;
+        TEXTURE =262144;
+        TURNTABLE_CALIB_POSE =524288;
+     }
+
+     Type type = 1;
+     uint64 id = 2;
+     google.protobuf.Timestamp timestamp = 3;
+     google.protobuf.Duration exposure  = 4;
+     double gain = 5;
+     float laser_power = 6; // power of the laser
+     float light_power = 7; // power of the led light
+     uint32 width = 8;
+     uint32 height = 9;
+     uint32 channels = 10;
+     uint32 crop_width = 11;
+     uint32 crop_height = 12;
+     float turntable = 13;       // Turntable angle in rad if any
+     bytes data = 16;            // Image Data
+     uint32 flags = 17;
+     uint64 serial = 18;         // serial number of the camera
+}
+
